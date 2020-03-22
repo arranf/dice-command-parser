@@ -1,6 +1,6 @@
 [package]
-name = "dice-parser"
-version = "0.2.0"
+name = "dice-command-parser"
+version = "0.3.0"
 authors = ["Arran France <arran@arranfrance.com>"]
 edition = "2018"
 
