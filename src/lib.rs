@@ -16,6 +16,10 @@ fn roll_command_parser(i: &str) -> nom::IResult<&str, &str> {
     bytes::complete::tag_no_case("!roll")(i)
 }
 
+fn multi_dice_parser(i: &str) -> nom::IResult<&str, (Option<&str>, &str)> {
+    sequence::tuple((combinator::opt(character::complete::digit1), dice_parser))(i)
+}
+
 fn dice_parser(i: &str) -> nom::IResult<&str, &str> {
     sequence::preceded(character::complete::char('d'), character::complete::digit1)(i)
 }
@@ -35,7 +39,7 @@ pub fn parse_line(i: &str) -> Result<DiceRoll, ParserError> {
     let parser_output = combinator::all_consuming(sequence::tuple((
         roll_command_parser,
         character::complete::space0,
-        dice_parser,
+        multi_dice_parser,
         character::complete::space0,
         combinator::opt(sequence::tuple((
             modifier_sign_parser,
@@ -50,32 +54,26 @@ pub fn parse_line(i: &str) -> Result<DiceRoll, ParserError> {
             (
                 _, // Roll command
                 _, // space
-                dice,
+                (number_of_dice, dice_sides),
                 _, //space
                 optional_modifier,
             ),
         )) => {
-            let dice_sides: u32 = dice.parse()?;
+            let number_of_dice: u32 = number_of_dice.map_or(Ok(1), |v| v.parse())?;
+            let dice_sides: u32 = dice_sides.parse()?;
             match optional_modifier {
-                None => {
-                    return Ok(DiceRoll {
-                        dice_sides,
-                        modifier: None,
-                    })
-                }
+                None => Ok(DiceRoll::new(dice_sides, None, number_of_dice)),
                 Some((sign, _, value)) => {
-                    let modifier_value: u32 = value.parse()?;
+                    let modifier_value: i32 = value.parse()?;
                     match sign {
-                        Modifier::Plus => Ok(DiceRoll {
+                        Modifier::Plus => Ok(DiceRoll::new(
                             dice_sides,
-                            modifier: Some(modifier_value as i32),
-                        }),
+                            Some(modifier_value),
+                            number_of_dice,
+                        )),
                         Modifier::Minus => {
                             let modifier = Some(modifier_value as i32 * -1);
-                            Ok(DiceRoll {
-                                dice_sides,
-                                modifier: modifier,
-                            })
+                            Ok(DiceRoll::new(dice_sides, modifier, number_of_dice))
                         }
                     }
                 }
@@ -119,6 +117,12 @@ mod tests {
     }
 
     #[test]
+    fn test_multi_dice_parser() {
+        assert_eq!(multi_dice_parser("2d6 + 2"), Ok((" + 2", (Some("2"), "6"))));
+        assert_eq!(multi_dice_parser("d8 + 3"), Ok((" + 3", (None, "8"))));
+    }
+
+    #[test]
     fn test_modifier_sign() {
         assert_eq!(modifier_sign_parser("+2"), Ok(("2", Modifier::Plus)));
         assert_eq!(modifier_sign_parser("-1"), Ok(("1", Modifier::Minus)));
@@ -140,12 +144,24 @@ mod tests {
 
     #[test]
     fn test_parse_line() {
-        assert_eq!(parse_line("!roll d6"), Ok(DiceRoll::new(6, None)));
+        assert_eq!(parse_line("!roll d6"), Ok(DiceRoll::new(6, None, 1)));
         assert_eq!(
             parse_line("!roll d20 +      5"),
-            Ok(DiceRoll::new(20, Some(5)))
+            Ok(DiceRoll::new(20, Some(5), 1))
         );
-        assert_eq!(parse_line("!roll d0 - 5"), Ok(DiceRoll::new(0, Some(-5))));
+        assert_eq!(
+            parse_line("!roll 2d10 - 5"),
+            Ok(DiceRoll::new(10, Some(-5), 2))
+        );
+        assert_eq!(parse_line("!roll 3d6"), Ok(DiceRoll::new(6, None, 3)));
+        assert_eq!(
+            parse_line("!roll 5d20 +      5"),
+            Ok(DiceRoll::new(20, Some(5), 5))
+        );
+        assert_eq!(
+            parse_line("!roll d0 - 5"),
+            Ok(DiceRoll::new(0, Some(-5), 1))
+        );
         assert_eq!(parse_line("roll d20"), Err(ParserError::ParseError));
         assert_eq!(parse_line("roll d20"), Err(ParserError::ParseError));
         assert_eq!(parse_line("d20"), Err(ParserError::ParseError));
