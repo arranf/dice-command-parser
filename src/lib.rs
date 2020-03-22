@@ -1,6 +1,16 @@
-use nom::{branch, bytes, character, combinator, sequence};
+#![warn(clippy::all, clippy::pedantic)]
+#![allow(clippy::pedantic::module_name_repetitions)]
+#![warn(missing_docs)]
+#![warn(missing_doc_code_examples)]
 
+//! This crate provides functionality for the basic parsing of dice roll commands e.g. `d100`, `d6 + 5`, `2d20 - 1`.
+//! Given some input it will produce a `DiceRoll` struct which can be used to then calculate a result.
+
+use nom::{branch, character, combinator, sequence};
+
+/// Provides access to the `DiceRoll` struct.
 pub mod dice_roll;
+/// Provides access to the `ParserError` struct.
 pub mod error;
 
 use crate::dice_roll::DiceRoll;
@@ -31,6 +41,25 @@ fn modifier_value_parser(i: &str) -> nom::IResult<&str, &str> {
     character::complete::digit1(i)
 }
 
+/// Takes a string of dice input and returns a `Result<DiceRoll, ParserError>`
+///
+/// The string will be consumed in the process and must strictly match the format of the parser.
+///
+/// # Examples
+///
+/// Standard usage:
+///
+/// ```
+/// let input = "3d6 - 5";
+/// let dice_roll = parse_line(&input)?;
+/// ```
+///
+/// # Errors
+/// This function can fail when one of the following occurs
+/// 1. The line failed to parse.
+/// 2. An error occurred parsing the numbers provided. This will likely be an overflow or underflow error.
+///
+/// For more information see `ParserError`.
 pub fn parse_line(i: &str) -> Result<DiceRoll, ParserError> {
     let parser_output = combinator::all_consuming(sequence::tuple((
         multi_dice_parser,
@@ -53,7 +82,7 @@ pub fn parse_line(i: &str) -> Result<DiceRoll, ParserError> {
                 _, // Space
             ),
         )) => {
-            let number_of_dice: u32 = number_of_dice.map_or(Ok(1), |v| v.parse())?;
+            let number_of_dice: u32 = number_of_dice.map_or(Ok(1), str::parse)?;
             let dice_sides: u32 = dice_sides.parse()?;
             match optional_modifier {
                 None => Ok(DiceRoll::new(dice_sides, None, number_of_dice)),
@@ -66,7 +95,7 @@ pub fn parse_line(i: &str) -> Result<DiceRoll, ParserError> {
                             number_of_dice,
                         )),
                         Modifier::Minus => {
-                            let modifier = Some(modifier_value as i32 * -1);
+                            let modifier = Some(-modifier_value);
                             Ok(DiceRoll::new(dice_sides, modifier, number_of_dice))
                         }
                     }
