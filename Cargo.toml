@@ -1,8 +1,13 @@
 [package]
 name = "dice-command-parser"
-version = "0.3.0"
+version = "0.3.1"
+description = "A library for parsing basic dice roll commands like 2d20 + 2"
 authors = ["Arran France <arran@arranfrance.com>"]
 edition = "2018"
+license = "MIT"
+repository = "https://github.com/arranf/dice-command-parser"
+readme = "README.md"
+keywords = ["dnd", "dice", "parser"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
