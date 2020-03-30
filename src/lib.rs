@@ -6,14 +6,14 @@
 //! This crate provides functionality for the basic parsing of dice roll commands e.g. `d100`, `d6 + 5`, `2d20 - 1`.
 //! Given some input it will produce a `DiceRoll` struct which can be used to then calculate a result.
 
-use nom::{branch, character, combinator, sequence};
+use nom::{branch, bytes, character, combinator, sequence};
 
 /// Provides access to the `DiceRoll` struct.
 pub mod dice_roll;
 /// Provides access to the `ParserError` struct.
 pub mod error;
 
-use crate::dice_roll::DiceRoll;
+use crate::dice_roll::{DiceRoll, RollType};
 use crate::error::ParserError;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -41,6 +41,38 @@ fn modifier_value_parser(i: &str) -> nom::IResult<&str, &str> {
     character::complete::digit1(i)
 }
 
+fn dice_roll_type_parser(i: &str) -> nom::IResult<&str, RollType> {
+    let result = advantage_or_disadvantage_parser(i);
+    match result {
+        Ok((i, None)) => Ok((i, RollType::Regular)),
+        Ok((i, Some(roll_type))) => Ok((i, roll_type)),
+        Err(e) => Err(e),
+    }
+}
+
+fn advantage_or_disadvantage_parser(i: &str) -> nom::IResult<&str, Option<RollType>> {
+    combinator::opt(branch::alt((
+        combinator::value(
+            RollType::WithAdvantage,
+            branch::alt((
+                // Order matters here
+                bytes::complete::tag_no_case("advantage"),
+                bytes::complete::tag_no_case("adv"),
+                bytes::complete::tag_no_case("a"),
+            )),
+        ),
+        combinator::value(
+            RollType::WithDisadvantage,
+            branch::alt((
+                // Order matters here
+                bytes::complete::tag_no_case("disadvantage"),
+                bytes::complete::tag_no_case("dadv"),
+                bytes::complete::tag_no_case("d"),
+            )),
+        ),
+    )))(i)
+}
+
 /// Takes a string of dice input and returns a `Result<DiceRoll, ParserError>`
 ///
 /// The string will be consumed in the process and must strictly match the format of the parser.
@@ -50,8 +82,11 @@ fn modifier_value_parser(i: &str) -> nom::IResult<&str, &str> {
 /// Standard usage:
 ///
 /// ```
+/// use dice_command_parser::{parse_line, error::ParserError};
+///
 /// let input = "3d6 - 5";
 /// let dice_roll = parse_line(&input)?;
+/// # Ok::<(), ParserError>(())
 /// ```
 ///
 /// # Errors
@@ -63,13 +98,14 @@ fn modifier_value_parser(i: &str) -> nom::IResult<&str, &str> {
 pub fn parse_line(i: &str) -> Result<DiceRoll, ParserError> {
     let parser_output = combinator::all_consuming(sequence::tuple((
         multi_dice_parser,
-        character::complete::space0,
+        character::complete::multispace0,
         combinator::opt(sequence::tuple((
             modifier_sign_parser,
-            character::complete::space0,
+            character::complete::multispace0,
             modifier_value_parser,
         ))),
-        character::complete::space0,
+        character::complete::multispace0,
+        dice_roll_type_parser,
     )))(i);
 
     match parser_output {
@@ -80,12 +116,13 @@ pub fn parse_line(i: &str) -> Result<DiceRoll, ParserError> {
                 _, // space
                 optional_modifier,
                 _, // Space
+                roll_type,
             ),
         )) => {
             let number_of_dice: u32 = number_of_dice.map_or(Ok(1), str::parse)?;
             let dice_sides: u32 = dice_sides.parse()?;
             match optional_modifier {
-                None => Ok(DiceRoll::new(dice_sides, None, number_of_dice)),
+                None => Ok(DiceRoll::new(dice_sides, None, number_of_dice, roll_type)),
                 Some((sign, _, value)) => {
                     let modifier_value: i32 = value.parse()?;
                     match sign {
@@ -93,10 +130,16 @@ pub fn parse_line(i: &str) -> Result<DiceRoll, ParserError> {
                             dice_sides,
                             Some(modifier_value),
                             number_of_dice,
+                            roll_type,
                         )),
                         Modifier::Minus => {
                             let modifier = Some(-modifier_value);
-                            Ok(DiceRoll::new(dice_sides, modifier, number_of_dice))
+                            Ok(DiceRoll::new(
+                                dice_sides,
+                                modifier,
+                                number_of_dice,
+                                roll_type,
+                            ))
                         }
                     }
                 }
@@ -147,20 +190,89 @@ mod tests {
     }
 
     #[test]
+    fn test_roll_type_parser() {
+        assert_eq!(
+            dice_roll_type_parser("advantage  "),
+            Ok(("  ", RollType::WithAdvantage))
+        );
+        assert_eq!(
+            dice_roll_type_parser("adv"),
+            Ok(("", RollType::WithAdvantage))
+        );
+        assert_eq!(
+            dice_roll_type_parser("a"),
+            Ok(("", RollType::WithAdvantage))
+        );
+
+        assert_eq!(
+            dice_roll_type_parser("disadvantage "),
+            Ok((" ", RollType::WithDisadvantage))
+        );
+        assert_eq!(
+            dice_roll_type_parser("dadv"),
+            Ok(("", RollType::WithDisadvantage))
+        );
+        assert_eq!(
+            dice_roll_type_parser("d"),
+            Ok(("", RollType::WithDisadvantage))
+        );
+
+        assert_eq!(dice_roll_type_parser(""), Ok(("", RollType::Regular)));
+    }
+
+    #[test]
     fn test_parse_line() {
-        assert_eq!(parse_line("d6"), Ok(DiceRoll::new(6, None, 1)));
+        assert_eq!(
+            parse_line("d6"),
+            Ok(DiceRoll::new(6, None, 1, RollType::Regular))
+        );
         assert_eq!(
             parse_line("d20 +      5"),
-            Ok(DiceRoll::new(20, Some(5), 1))
+            Ok(DiceRoll::new(20, Some(5), 1, RollType::Regular))
         );
-        assert_eq!(parse_line("2d10 - 5"), Ok(DiceRoll::new(10, Some(-5), 2)));
-        assert_eq!(parse_line("3d6"), Ok(DiceRoll::new(6, None, 3)));
+        assert_eq!(
+            parse_line("2d10 - 5"),
+            Ok(DiceRoll::new(10, Some(-5), 2, RollType::Regular))
+        );
+        assert_eq!(
+            parse_line("3d6"),
+            Ok(DiceRoll::new(6, None, 3, RollType::Regular))
+        );
         assert_eq!(
             parse_line("5d20 +      5"),
-            Ok(DiceRoll::new(20, Some(5), 5))
+            Ok(DiceRoll::new(20, Some(5), 5, RollType::Regular))
         );
-        assert_eq!(parse_line("d0 - 5"), Ok(DiceRoll::new(0, Some(-5), 1)));
+        assert_eq!(
+            parse_line("d0 - 5"),
+            Ok(DiceRoll::new(0, Some(-5), 1, RollType::Regular))
+        );
+
+        assert_eq!(
+            parse_line("d200 A"),
+            Ok(DiceRoll::new(200, None, 1, RollType::WithAdvantage))
+        );
+        assert_eq!(
+            parse_line("d200 adv"),
+            Ok(DiceRoll::new(200, None, 1, RollType::WithAdvantage))
+        );
+        assert_eq!(
+            parse_line("d200 advantage"),
+            Ok(DiceRoll::new(200, None, 1, RollType::WithAdvantage))
+        );
+
+        assert_eq!(
+            parse_line("d200 disadvantage"),
+            Ok(DiceRoll::new(200, None, 1, RollType::WithDisadvantage))
+        );
+        assert_eq!(
+            parse_line("d200 d"),
+            Ok(DiceRoll::new(200, None, 1, RollType::WithDisadvantage))
+        );
+        assert_eq!(
+            parse_line("d200 dadv"),
+            Ok(DiceRoll::new(200, None, 1, RollType::WithDisadvantage))
+        );
+
         assert_eq!(parse_line("cd20"), Err(ParserError::ParseError));
-        assert_eq!(parse_line("d200 A"), Err(ParserError::ParseError));
     }
 }
