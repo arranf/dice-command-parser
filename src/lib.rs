@@ -42,7 +42,7 @@ fn modifier_value_parser(i: &str) -> nom::IResult<&str, &str> {
 }
 
 fn dice_roll_type_parser(i: &str) -> nom::IResult<&str, RollType> {
-    let result = advantage_or_disadvantage_parser(i);
+    let result = roll_type_parser(i);
     match result {
         Ok((i, None)) => Ok((i, RollType::Regular)),
         Ok((i, Some(roll_type))) => Ok((i, roll_type)),
@@ -50,7 +50,7 @@ fn dice_roll_type_parser(i: &str) -> nom::IResult<&str, RollType> {
     }
 }
 
-fn advantage_or_disadvantage_parser(i: &str) -> nom::IResult<&str, Option<RollType>> {
+fn roll_type_parser(i: &str) -> nom::IResult<&str, Option<RollType>> {
     combinator::opt(branch::alt((
         combinator::value(
             RollType::WithAdvantage,
@@ -68,6 +68,15 @@ fn advantage_or_disadvantage_parser(i: &str) -> nom::IResult<&str, Option<RollTy
                 bytes::complete::tag_no_case("disadvantage"),
                 bytes::complete::tag_no_case("dadv"),
                 bytes::complete::tag_no_case("d"),
+            )),
+        ),
+        combinator::value(
+            RollType::Independent,
+            branch::alt((
+                // Order matters here
+                bytes::complete::tag_no_case("independent"),
+                bytes::complete::tag_no_case("ind"),
+                bytes::complete::tag_no_case("i"),
             )),
         ),
     )))(i)
@@ -248,6 +257,19 @@ mod tests {
         );
 
         assert_eq!(
+            parse_line("d200a"),
+            Ok(DiceRoll::new(200, None, 1, RollType::WithAdvantage))
+        );
+        assert_eq!(
+            parse_line("d200adv"),
+            Ok(DiceRoll::new(200, None, 1, RollType::WithAdvantage))
+        );
+        assert_eq!(
+            parse_line("d200advantage"),
+            Ok(DiceRoll::new(200, None, 1, RollType::WithAdvantage))
+        );
+
+        assert_eq!(
             parse_line("d200 A"),
             Ok(DiceRoll::new(200, None, 1, RollType::WithAdvantage))
         );
@@ -271,6 +293,32 @@ mod tests {
         assert_eq!(
             parse_line("d200 dadv"),
             Ok(DiceRoll::new(200, None, 1, RollType::WithDisadvantage))
+        );
+
+        assert_eq!(
+            parse_line("d200 independent"),
+            Ok(DiceRoll::new(200, None, 1, RollType::Independent))
+        );
+        assert_eq!(
+            parse_line("d200 ind"),
+            Ok(DiceRoll::new(200, None, 1, RollType::Independent))
+        );
+        assert_eq!(
+            parse_line("d200 i"),
+            Ok(DiceRoll::new(200, None, 1, RollType::Independent))
+        );
+
+        assert_eq!(
+            parse_line("d200independent"),
+            Ok(DiceRoll::new(200, None, 1, RollType::Independent))
+        );
+        assert_eq!(
+            parse_line("d200ind"),
+            Ok(DiceRoll::new(200, None, 1, RollType::Independent))
+        );
+        assert_eq!(
+            parse_line("d200i"),
+            Ok(DiceRoll::new(200, None, 1, RollType::Independent))
         );
 
         assert_eq!(parse_line("cd20"), Err(ParserError::ParseError));

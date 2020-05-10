@@ -77,15 +77,17 @@ impl DiceRoll {
     }
 }
 
-/// Represents whether a roll has advantage, disadvantage, or not.
+/// Represents whether a roll has advantage, disadvantage, independence, or not.
 #[derive(Clone, Debug, PartialEq)]
 pub enum RollType {
     /// The roll has advantage and the highest of the two rolls for a set of dice is taken.
     WithAdvantage,
     /// The roll has disadvantage and the lowest of the two rolls for a set of dice is taken.
     WithDisadvantage,
-    /// A regular roll occurs - only one roll neds to occur.
+    /// A regular roll occurs - only one roll needs to occur.
     Regular,
+    /// The each of the dice are independent of each other in the roll and the modifier should be applied to each.
+    Independent,
 }
 
 impl Default for RollType {
