@@ -214,8 +214,8 @@ mod tests {
         );
 
         assert_eq!(
-            dice_roll_type_parser("disadvantage "),
-            Ok((" ", RollType::WithDisadvantage))
+            dice_roll_type_parser("disadvantage"),
+            Ok(("", RollType::WithDisadvantage))
         );
         assert_eq!(
             dice_roll_type_parser("dadv"),
@@ -225,6 +225,17 @@ mod tests {
             dice_roll_type_parser("d"),
             Ok(("", RollType::WithDisadvantage))
         );
+
+        assert_eq!(
+            dice_roll_type_parser("independent"),
+            Ok((" ", RollType::Independent))
+        );
+        assert_eq!(
+            dice_roll_type_parser("ind"),
+            Ok(("", RollType::Independent))
+        );
+        assert_eq!(dice_roll_type_parser("i"), Ok(("", RollType::Independent)));
+        assert_eq!(dice_roll_type_parser("I"), Ok(("", RollType::Independent)));
 
         assert_eq!(dice_roll_type_parser(""), Ok(("", RollType::Regular)));
     }
