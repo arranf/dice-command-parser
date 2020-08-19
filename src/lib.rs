@@ -574,9 +574,6 @@ mod tests {
             ])
         );
 
-        // Is ambigious
-        assert_eq!(parse_line("d20 + d4 - 2 d64"), Err(ParserError::ParseError));
-
         assert_eq!(parse_line("cd20"), Err(ParserError::ParseError));
     }
 }
