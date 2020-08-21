@@ -7,7 +7,7 @@ edition = "2018"
 license = "MIT"
 repository = "https://github.com/arranf/dice-command-parser"
 readme = "README.md"
-keywords = ["dnd", "dice", "parser", "d&d", "ttrpg"]
+keywords = ["dnd", "dice", "parser", "ttrpg"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
