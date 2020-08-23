@@ -6,7 +6,11 @@
 //! This crate provides functionality for the basic parsing of dice roll commands e.g. `d100`, `d6 + 5`, `2d20 - 1`.
 //! Given some input it will produce a `DiceRoll` struct which can be used to then calculate a result.
 
-use nom::{branch, bytes, character, combinator, multi, sequence};
+use nom::{
+    branch, bytes, character, combinator,
+    error::{ParseError, VerboseError},
+    multi, sequence, Err,
+};
 
 /// Provides access to the `DiceRoll` struct.
 pub mod dice_roll;
@@ -133,7 +137,6 @@ fn roll_parser_with_operation(i: &str) -> nom::IResult<&str, DiceRoll> {
 fn roll_parser_without_operation(i: &str) -> nom::IResult<&str, DiceRoll> {
     let parser_output = sequence::tuple((
         multi_dice_parser,
-        character::complete::multispace0,
         modifier_parser,
         character::complete::multispace0,
         dice_roll_type_parser,
@@ -143,7 +146,6 @@ fn roll_parser_without_operation(i: &str) -> nom::IResult<&str, DiceRoll> {
             remaining, // Remaining input
             (
                 (number_of_dice, dice_sides),
-                _, // space
                 modifier,
                 _, // Space
                 roll_type,
@@ -211,23 +213,35 @@ fn dice_roll_from_parsed_items(
 /// For more information see `ParserError`.
 pub fn parse_line(i: &str) -> Result<Vec<DiceRoll>, ParserError> {
     let mut rolls: Vec<DiceRoll> = Vec::new();
-    if let Ok((remaining_to_parse, roll)) = roll_parser_without_operation(i) {
-        rolls.push(roll);
+    match roll_parser_without_operation(i) {
+        Ok((remaining_to_parse, roll)) => {
+            rolls.push(roll);
 
-        // Keep attempting to match
-        match multi::many0(roll_parser_with_operation)(remaining_to_parse) {
-            Ok((remaining, additional_rolls)) => {
-                if !remaining.trim().is_empty() {
-                    return Err(ParserError::ParseError);
+            // Keep attempting to match
+            match multi::many0(roll_parser_with_operation)(remaining_to_parse) {
+                Ok((remaining, additional_rolls)) => {
+                    if !remaining.trim().is_empty() {
+                        return Err(ParserError::ParseError(format!(
+                            "Expected remaining input to be empty, found: {0}",
+                            remaining
+                        )));
+                    }
+                    rolls.extend(additional_rolls);
+                    return Ok(rolls);
                 }
-                rolls.extend(additional_rolls);
-                return Ok(rolls);
+                Err(Err::Error(e)) | Err(Err::Failure(e)) => {
+                    Err(ParserError::ParseError(nom::error::convert_error(
+                        remaining_to_parse,
+                        VerboseError::from_error_kind(e.0, e.1),
+                    )))
+                }
+                Err(Err::Incomplete(_)) => Err(ParserError::Unknown),
             }
-            // TODO: Include this error onwards
-            Err(_) => Err(ParserError::ParseError),
         }
-    } else {
-        return Err(ParserError::ParseError);
+        Err(Err::Error(e)) | Err(Err::Failure(e)) => Err(ParserError::ParseError(
+            nom::error::convert_error(i, VerboseError::from_error_kind(e.0, e.1)),
+        )),
+        Err(Err::Incomplete(_)) => Err(ParserError::Unknown),
     }
 }
 
@@ -539,6 +553,19 @@ mod tests {
             ])
         );
 
+        assert!(parse_line("cd20").is_err());
+    }
+
+    #[test]
+    fn test_multi_dice_type_parse_line() {
+        assert_eq!(
+            parse_line("2d6 + 2d4"),
+            Ok(vec![
+                DiceRoll::new(6, None, 2, RollType::Regular, Operation::Addition),
+                DiceRoll::new(4, None, 2, RollType::Regular, Operation::Addition)
+            ])
+        );
+
         assert_eq!(
             parse_line("d20 + 2 + d4"),
             Ok(vec![
@@ -573,7 +600,5 @@ mod tests {
                 DiceRoll::new(6, None, 2, RollType::Regular, Operation::Subtraction),
             ])
         );
-
-        assert_eq!(parse_line("cd20"), Err(ParserError::ParseError));
     }
 }
