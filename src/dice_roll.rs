@@ -10,8 +10,6 @@ pub struct DiceRoll {
     pub modifier: Option<i32>,
     /// Whether the roll has advantage, disadvantage, or is a regular roll
     pub roll_type: RollType,
-    /// How the roll should be applied
-    pub operation: Operation,
 }
 
 impl DiceRoll {
@@ -38,14 +36,12 @@ impl DiceRoll {
         modifier: Option<i32>,
         number_of_dice_to_roll: u32,
         roll_type: RollType,
-        operation: Operation,
     ) -> Self {
         DiceRoll {
             dice_sides,
             modifier,
             number_of_dice_to_roll,
             roll_type,
-            operation,
         }
     }
 
@@ -71,14 +67,12 @@ impl DiceRoll {
         dice_sides: u32,
         modifier: Option<i32>,
         number_of_dice_to_roll: u32,
-        operation: Operation,
     ) -> Self {
         DiceRoll {
             dice_sides,
             modifier,
             number_of_dice_to_roll,
             roll_type: RollType::Regular,
-            operation,
         }
     }
 }
