@@ -4,7 +4,7 @@
 #![warn(missing_doc_code_examples)]
 
 //! This crate provides functionality for the basic parsing of dice roll commands e.g. `d100`, `d6 + 5`, `2d20 - 1`.
-//! Given some input it will produce a `DiceRoll` struct which can be used to then calculate a result.
+//! Given some input it will produce a `DiceRollWithOp` struct which can be used to then calculate a result.
 
 use nom::{branch, bytes, character, combinator, multi, sequence, Err};
 
@@ -24,7 +24,7 @@ use crate::error::ParserError;
 use crate::parse::terminated_spare;
 
 // + or - or end
-fn modifier_terminating_symbol_or_nothing(i: &str) -> nom::IResult<&str, &str> {
+fn parse_end_of_input_or_modifier(i: &str) -> nom::IResult<&str, &str> {
     branch::alt((
         bytes::complete::tag("+"),
         bytes::complete::tag("-"),
@@ -33,37 +33,33 @@ fn modifier_terminating_symbol_or_nothing(i: &str) -> nom::IResult<&str, &str> {
 }
 
 // + or -
-fn operation_parser(i: &str) -> nom::IResult<&str, Operation> {
+fn parse_operator_as_value(i: &str) -> nom::IResult<&str, Operation> {
     branch::alt((
         combinator::value(Operation::Addition, character::complete::char('+')),
         combinator::value(Operation::Subtraction, character::complete::char('-')),
     ))(i)
 }
 
-// advantage or disadvantage
-// d20
-fn roll_type_parser(i: &str) -> nom::IResult<&str, Option<RollType>> {
-    combinator::opt(branch::alt((
+// Returns RollType::Regular if no adv or disadv is parsed
+fn parse_roll_type(i: &str) -> nom::IResult<&str, RollType> {
+    let result = combinator::opt(branch::alt((
         combinator::value(
             RollType::WithAdvantage,
+            // Only parse advantage if preceding a operating separating dice strings or at the end of input
             terminated_spare(
                 bytes::complete::tag_no_case("a"),
-                modifier_terminating_symbol_or_nothing,
+                parse_end_of_input_or_modifier,
             ),
         ),
         combinator::value(
             RollType::WithDisadvantage,
+            // Only parse advantage if preceding a operating separating dice strings or at the end of input
             terminated_spare(
                 bytes::complete::tag_no_case("d"),
-                modifier_terminating_symbol_or_nothing,
+                parse_end_of_input_or_modifier,
             ),
         ),
-    )))(i)
-}
-
-// Returns RollType::Regular if no adv or disadv is parsed
-fn dice_roll_type_parser(i: &str) -> nom::IResult<&str, RollType> {
-    let result = roll_type_parser(i);
+    )))(i);
     match result {
         Ok((i, None)) => Ok((i, RollType::Regular)),
         Ok((i, Some(roll_type))) => Ok((i, roll_type)),
@@ -71,7 +67,8 @@ fn dice_roll_type_parser(i: &str) -> nom::IResult<&str, RollType> {
     }
 }
 
-fn dice_parser(i: &str) -> nom::IResult<&str, (Option<&str>, &str, &str)> {
+// Matches: 3d6
+fn parse_dice_parts(i: &str) -> nom::IResult<&str, (Option<&str>, &str, &str)> {
     sequence::tuple((
         combinator::opt(character::complete::digit1),
         bytes::complete::tag_no_case("d"),
@@ -79,21 +76,21 @@ fn dice_parser(i: &str) -> nom::IResult<&str, (Option<&str>, &str, &str)> {
     ))(i)
 }
 
-fn roll_parser(i: &str) -> nom::IResult<&str, DiceRoll> {
+// Matches: 3d6-1a, 3d6-1, 3d6
+fn parse_roll_as_value(i: &str) -> nom::IResult<&str, DiceRoll> {
     // Order matters
     branch::alt((
-        dice_op_number_class_parser,
-        dice_op_number_parser,
-        dice_class_parser,
-        dice_into_dice_roll_parser,
+        parse_dice_parts_op_number_roll_type,
+        parse_dice_without_operator,
+        // parse_dice_into_value,
     ))(i)
 }
 
-// d20+1a
-fn dice_op_number_class_parser(i: &str) -> nom::IResult<&str, DiceRoll> {
+// Matches: 3d6-1a or 3d6-1
+fn parse_dice_parts_op_number_roll_type(i: &str) -> nom::IResult<&str, DiceRoll> {
     let result = sequence::tuple((
-        dice_parser,
-        operation_parser,
+        parse_dice_parts,
+        parse_operator_as_value,
         terminated_spare(
             character::complete::digit1,
             combinator::not(sequence::tuple((
@@ -101,7 +98,7 @@ fn dice_op_number_class_parser(i: &str) -> nom::IResult<&str, DiceRoll> {
                 character::complete::digit1,
             ))),
         ),
-        dice_roll_type_parser,
+        parse_roll_type,
     ))(i);
     match result {
         Ok((remaining, ((number_of_dice, _, dice_sides), operation, modifier, roll_type))) => Ok((
@@ -118,34 +115,9 @@ fn dice_op_number_class_parser(i: &str) -> nom::IResult<&str, DiceRoll> {
     }
 }
 
-// 2d20+1
-fn dice_op_number_parser(i: &str) -> nom::IResult<&str, DiceRoll> {
-    let result = sequence::tuple((
-        dice_parser,
-        operation_parser,
-        terminated_spare(
-            character::complete::digit1,
-            combinator::not(bytes::complete::tag_no_case("d")),
-        ),
-    ))(i);
-    match result {
-        Ok((remaining, ((number_of_dice, _, dice_sides), operation, modifier))) => Ok((
-            remaining,
-            dice_roll_from_parsed_items(
-                number_of_dice,
-                dice_sides,
-                Some(operation),
-                Some(modifier),
-                RollType::Regular,
-            ),
-        )),
-        Err(e) => Err(e),
-    }
-}
-
-// 2d8a
-fn dice_class_parser(i: &str) -> nom::IResult<&str, DiceRoll> {
-    let result = sequence::tuple((dice_parser, dice_roll_type_parser))(i);
+// Matches: 2d8a or 2d8
+fn parse_dice_without_operator(i: &str) -> nom::IResult<&str, DiceRoll> {
+    let result = sequence::tuple((parse_dice_parts, parse_roll_type))(i);
     match result {
         Ok((remaining, ((number_of_dice, _, dice_sides), roll_type))) => Ok((
             remaining,
@@ -155,21 +127,12 @@ fn dice_class_parser(i: &str) -> nom::IResult<&str, DiceRoll> {
     }
 }
 
-// 3d6
-fn dice_into_dice_roll_parser(i: &str) -> nom::IResult<&str, DiceRoll> {
-    let (remaining, (number_of_dice, _, dice_sides)) = dice_parser(i)?;
-    Ok((
-        remaining,
-        dice_roll_from_parsed_items(number_of_dice, dice_sides, None, None, RollType::Regular),
-    ))
-}
-
-fn statement_parser(i: &str) -> nom::IResult<&str, Vec<DiceRollWithOp>> {
+fn parse_statement_with_leading_op(i: &str) -> nom::IResult<&str, Vec<DiceRollWithOp>> {
     let (remaining, (operation, roll, later_rolls)) = sequence::tuple((
-        operation_parser,
-        roll_parser,
+        parse_operator_as_value,
+        parse_roll_as_value,
         branch::alt((
-            statement_parser,
+            parse_statement_with_leading_op,
             combinator::value(Vec::new(), character::complete::space0), // TODO: Error?
         )),
     ))(i)?;
@@ -181,22 +144,24 @@ fn statement_parser(i: &str) -> nom::IResult<&str, Vec<DiceRollWithOp>> {
     Ok((remaining, rolls))
 }
 
-fn single_statement_into_roll_with_op(i: &str) -> nom::IResult<&str, DiceRollWithOp> {
-    let (remaining, (operator, roll)) =
-        sequence::tuple((combinator::opt(operation_parser), roll_parser))(i)?;
+// TODO: Refactor
+fn parse_statement_into_value(i: &str) -> nom::IResult<&str, DiceRollWithOp> {
+    let (remaining, (operator, roll)) = sequence::tuple((
+        combinator::opt(parse_operator_as_value),
+        parse_roll_as_value,
+    ))(i)?;
     Ok((
         remaining,
         DiceRollWithOp::new(roll, operator.unwrap_or(Operation::Addition)),
     ))
 }
 
+// Handles the special case of no leading operator
 fn parse_initial(i: &str) -> Result<(&str, DiceRollWithOp), ParserError> {
-    match single_statement_into_roll_with_op(i) {
+    match parse_statement_into_value(i) {
         Ok((remaining, roll)) => Ok((remaining, roll)),
         Err(Err::Error(e)) | Err(Err::Failure(e)) => {
-            print!("{0}", e);
-            // TODO: Actual error handling here
-            Err(ParserError::Unknown)
+            Err(ParserError::ParseError(format!("{0}", e)))
         }
         Err(Err::Incomplete(_)) => Err(ParserError::Unknown),
     }
@@ -260,7 +225,7 @@ pub fn parse_line(i: &str) -> Result<Vec<DiceRollWithOp>, ParserError> {
         return Ok(dice_rolls);
     }
 
-    match multi::many1(statement_parser)(remaining) {
+    match multi::many1(parse_statement_with_leading_op)(remaining) {
         Ok((remaining, new_rolls)) => {
             if !remaining.trim().is_empty() {
                 return Err(ParserError::ParseError(format!(
@@ -285,64 +250,64 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_dice_parser() {
-        assert_eq!(dice_parser("2d6 + 2"), Ok((" + 2", (Some("2"), "d", "6"))));
-        assert_eq!(dice_parser("d8 + 3"), Ok((" + 3", (None, "d", "8"))));
-        assert_eq!(dice_parser("d6 + 2"), Ok((" + 2", (None, "d", "6"))));
-        assert_eq!(dice_parser("d6+2+"), Ok(("+2+", (None, "d", "6"))));
-        assert_eq!(dice_parser("d1"), Ok(("", (None, "d", "1"))));
-        assert!(dice_parser("6 + 2").is_err());
+    fn test_parse_dice_parts() {
+        assert_eq!(
+            parse_dice_parts("2d6 + 2"),
+            Ok((" + 2", (Some("2"), "d", "6")))
+        );
+        assert_eq!(parse_dice_parts("d8 + 3"), Ok((" + 3", (None, "d", "8"))));
+        assert_eq!(parse_dice_parts("d6 + 2"), Ok((" + 2", (None, "d", "6"))));
+        assert_eq!(parse_dice_parts("d6+2+"), Ok(("+2+", (None, "d", "6"))));
+        assert_eq!(parse_dice_parts("d1"), Ok(("", (None, "d", "1"))));
+        assert!(parse_dice_parts("6 + 2").is_err());
     }
 
     #[test]
-    fn test_operation_parser() {
-        assert_eq!(operation_parser("+2"), Ok(("2", Operation::Addition)));
-        assert_eq!(operation_parser("-1"), Ok(("1", Operation::Subtraction)));
+    fn test_parse_operator_as_value() {
+        assert_eq!(
+            parse_operator_as_value("+2"),
+            Ok(("2", Operation::Addition))
+        );
+        assert_eq!(
+            parse_operator_as_value("-1"),
+            Ok(("1", Operation::Subtraction))
+        );
 
-        assert_eq!(operation_parser("*1").is_err(), true);
+        assert_eq!(parse_operator_as_value("*1").is_err(), true);
     }
 
     #[test]
     fn test_roll_type_parser() {
-        assert_eq!(
-            dice_roll_type_parser("a"),
-            Ok(("", RollType::WithAdvantage))
-        );
+        assert_eq!(parse_roll_type("a"), Ok(("", RollType::WithAdvantage)));
 
-        assert_eq!(
-            dice_roll_type_parser("d"),
-            Ok(("", RollType::WithDisadvantage))
-        );
+        assert_eq!(parse_roll_type("d"), Ok(("", RollType::WithDisadvantage)));
 
-        assert_eq!(dice_roll_type_parser(""), Ok(("", RollType::Regular)));
+        assert_eq!(parse_roll_type(""), Ok(("", RollType::Regular)));
 
-        assert_eq!(dice_roll_type_parser("e"), Ok(("e", RollType::Regular)));
-        assert_eq!(dice_roll_type_parser("+"), Ok(("+", RollType::Regular)));
-        assert_eq!(
-            dice_roll_type_parser("d+"),
-            Ok(("+", RollType::WithDisadvantage))
-        );
+        assert_eq!(parse_roll_type("e"), Ok(("e", RollType::Regular)));
+        assert_eq!(parse_roll_type("+"), Ok(("+", RollType::Regular)));
+        assert_eq!(parse_roll_type("d+"), Ok(("+", RollType::WithDisadvantage)));
     }
 
     #[test]
     fn test_roll_parser() {
         assert_eq!(
-            roll_parser("d6+2"),
+            parse_roll_as_value("d6+2"),
             Ok(("", DiceRoll::new_regular_roll(6, Some(2), 1)))
         );
 
         assert_eq!(
-            roll_parser("3d6-2"),
+            parse_roll_as_value("3d6-2"),
             Ok(("", DiceRoll::new_regular_roll(6, Some(-2), 3)))
         );
 
         assert_eq!(
-            roll_parser("2d20-2a"),
+            parse_roll_as_value("2d20-2a"),
             Ok(("", DiceRoll::new(20, Some(-2), 2, RollType::WithAdvantage)))
         );
 
         assert_eq!(
-            roll_parser("2d20-2a+d4"),
+            parse_roll_as_value("2d20-2a+d4"),
             Ok((
                 "+d4",
                 DiceRoll::new(20, Some(-2), 2, RollType::WithAdvantage)
@@ -350,31 +315,31 @@ mod tests {
         );
 
         assert_eq!(
-            roll_parser("2d20-2+d4"),
+            parse_roll_as_value("2d20-2+d4"),
             Ok(("+d4", DiceRoll::new(20, Some(-2), 2, RollType::Regular)))
         );
 
         assert_eq!(
-            roll_parser("2d6+d4"),
+            parse_roll_as_value("2d6+d4"),
             Ok(("+d4", DiceRoll::new(6, None, 2, RollType::Regular)))
         );
         assert_eq!(
-            roll_parser("2d6+2d4"),
+            parse_roll_as_value("2d6+2d4"),
             Ok(("+2d4", DiceRoll::new(6, None, 2, RollType::Regular)))
         );
 
         assert_eq!(
-            roll_parser("3d4+1d"),
+            parse_roll_as_value("3d4+1d"),
             Ok(("", DiceRoll::new(4, Some(1), 3, RollType::WithDisadvantage)))
         );
 
         assert_eq!(
-            roll_parser("3d4+1d"),
+            parse_roll_as_value("3d4+1d"),
             Ok(("", DiceRoll::new(4, Some(1), 3, RollType::WithDisadvantage)))
         );
 
         assert_eq!(
-            roll_parser("d1d"),
+            parse_roll_as_value("d1d"),
             Ok(("", DiceRoll::new(1, None, 1, RollType::WithDisadvantage)))
         )
     }
@@ -651,7 +616,7 @@ mod tests {
     #[test]
     fn test_statement_parser() {
         assert_eq!(
-            statement_parser("+2d4"),
+            parse_statement_with_leading_op("+2d4"),
             Ok((
                 "",
                 vec![DiceRollWithOp::new(
@@ -662,7 +627,7 @@ mod tests {
         );
 
         assert_eq!(
-            statement_parser("-3d12-4a"),
+            parse_statement_with_leading_op("-3d12-4a"),
             Ok((
                 "",
                 vec![DiceRollWithOp::new(
