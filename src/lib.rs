@@ -79,15 +79,11 @@ fn parse_dice_parts(i: &str) -> nom::IResult<&str, (Option<&str>, &str, &str)> {
 // Matches: 3d6-1a, 3d6-1, 3d6
 fn parse_roll_as_value(i: &str) -> nom::IResult<&str, DiceRoll> {
     // Order matters
-    branch::alt((
-        parse_dice_parts_op_number_roll_type,
-        parse_dice_without_operator,
-        // parse_dice_into_value,
-    ))(i)
+    branch::alt((parse_dice_with_operator, parse_dice_without_operator))(i)
 }
 
 // Matches: 3d6-1a or 3d6-1
-fn parse_dice_parts_op_number_roll_type(i: &str) -> nom::IResult<&str, DiceRoll> {
+fn parse_dice_with_operator(i: &str) -> nom::IResult<&str, DiceRoll> {
     let result = sequence::tuple((
         parse_dice_parts,
         parse_operator_as_value,
@@ -132,8 +128,8 @@ fn parse_statement_with_leading_op(i: &str) -> nom::IResult<&str, Vec<DiceRollWi
         parse_operator_as_value,
         parse_roll_as_value,
         branch::alt((
-            parse_statement_with_leading_op,
-            combinator::value(Vec::new(), character::complete::space0), // TODO: Error?
+            parse_statement_with_leading_op, // Recursive call
+            combinator::value(Vec::new(), character::complete::space0), // Base case
         )),
     ))(i)?;
     let mut rolls = Vec::with_capacity(later_rolls.len() + 1);
@@ -145,7 +141,7 @@ fn parse_statement_with_leading_op(i: &str) -> nom::IResult<&str, Vec<DiceRollWi
 }
 
 // TODO: Refactor
-fn parse_statement_into_value(i: &str) -> nom::IResult<&str, DiceRollWithOp> {
+fn parse_initial_statement(i: &str) -> nom::IResult<&str, DiceRollWithOp> {
     let (remaining, (operator, roll)) = sequence::tuple((
         combinator::opt(parse_operator_as_value),
         parse_roll_as_value,
@@ -156,15 +152,65 @@ fn parse_statement_into_value(i: &str) -> nom::IResult<&str, DiceRollWithOp> {
     ))
 }
 
-// Handles the special case of no leading operator
-fn parse_initial(i: &str) -> Result<(&str, DiceRollWithOp), ParserError> {
-    match parse_statement_into_value(i) {
-        Ok((remaining, roll)) => Ok((remaining, roll)),
-        Err(Err::Error(e)) | Err(Err::Failure(e)) => {
-            Err(ParserError::ParseError(format!("{0}", e)))
-        }
-        Err(Err::Incomplete(_)) => Err(ParserError::Unknown),
+fn parse_statements(i: &str) -> nom::IResult<&str, Vec<DiceRollWithOp>> {
+    // TODO: Make `later_rolls` an Option<>
+    let (remaining, (operation, roll, later_rolls)) = sequence::tuple((
+        parse_operator_as_value,
+        parse_roll_as_value,
+        branch::alt((
+            parse_statement_with_leading_op, // Recursive call
+            // TODO: Use combinator that consumes the 'empty string' i.e. doesn't consume input instead of value
+            combinator::value(Vec::new(), character::complete::space0), // Base case
+        )),
+    ))(i)?;
+    let mut rolls = Vec::with_capacity(later_rolls.len() + 1);
+    rolls.push(DiceRollWithOp::new(roll, operation));
+    for roll in later_rolls {
+        rolls.push(roll);
     }
+    Ok((remaining, rolls))
+}
+
+fn parse_group(i: &str) -> nom::IResult<&str, Vec<DiceRollWithOp>> {
+    let (remaining, (initial_roll, additional_rolls)) = sequence::tuple((
+        parse_initial_statement,
+        // TODO: Try combinator::opt()
+        branch::alt((
+            parse_statements,
+            // TODO: Use combinator that consumes the 'empty string' i.e. doesn't consume input instead of value
+            combinator::value(Vec::new(), character::complete::space0),
+        )),
+    ))(i)?;
+
+    let mut rolls = Vec::with_capacity(additional_rolls.len() + 1);
+    rolls.push(initial_roll);
+    for roll in additional_rolls {
+        rolls.push(roll);
+    }
+    Ok((remaining, rolls))
+}
+
+fn parse_groups(i: &str) -> nom::IResult<&str, Vec<Vec<DiceRollWithOp>>> {
+    let (remaining, (group_rolls, other_groups)) = sequence::tuple((
+        parse_group,
+        combinator::opt(sequence::tuple((
+            character::complete::char(','),
+            parse_groups,
+        ))),
+    ))(i)?;
+
+    let other_groups_size = match &other_groups {
+        Some((_, rolls)) => rolls.len(),
+        None => 0,
+    };
+
+    let mut rolls: Vec<Vec<DiceRollWithOp>> = Vec::with_capacity(other_groups_size + 1);
+    rolls.push(group_rolls);
+    if other_groups.is_some() {
+        let (_, other_groups_rolls) = other_groups.unwrap();
+        rolls.extend(other_groups_rolls);
+    }
+    Ok((remaining, rolls))
 }
 
 fn dice_roll_from_parsed_items(
@@ -214,26 +260,18 @@ fn dice_roll_from_parsed_items(
 /// 2. An error occurred parsing the numbers provided. This will likely be an overflow or underflow error.
 ///
 /// For more information see `ParserError`.
-pub fn parse_line(i: &str) -> Result<Vec<DiceRollWithOp>, ParserError> {
+pub fn parse_line(i: &str) -> Result<Vec<Vec<DiceRollWithOp>>, ParserError> {
     let whitespaceless: String = i.replace(" ", "");
-    let mut dice_rolls: Vec<DiceRollWithOp> = Vec::new();
 
-    let (remaining, new_rolls) = parse_initial(&whitespaceless)?;
-
-    dice_rolls.push(new_rolls);
-    if remaining.is_empty() {
-        return Ok(dice_rolls);
-    }
-
-    match multi::many1(parse_statement_with_leading_op)(remaining) {
-        Ok((remaining, new_rolls)) => {
+    match parse_groups(&whitespaceless) {
+        Ok((remaining, dice_rolls)) => {
             if !remaining.trim().is_empty() {
                 return Err(ParserError::ParseError(format!(
                     "Expected remaining input to be empty, found: {0}",
                     remaining
                 )));
             }
-            dice_rolls.extend(new_rolls.concat());
+            return Ok(dice_rolls);
         }
         Err(Err::Error(e)) | Err(Err::Failure(e)) => {
             return Err(ParserError::ParseError(format!("{0}", e)));
@@ -242,7 +280,7 @@ pub fn parse_line(i: &str) -> Result<Vec<DiceRollWithOp>, ParserError> {
             return Err(ParserError::Unknown);
         }
     }
-    Ok(dice_rolls)
+    drop(whitespaceless);
 }
 
 #[cfg(test)]
@@ -347,7 +385,7 @@ mod tests {
     #[test]
     fn test_parse_initial() {
         assert_eq!(
-            parse_initial("d6"),
+            parse_initial_statement("d6"),
             Ok((
                 "",
                 DiceRollWithOp::new(
@@ -358,7 +396,7 @@ mod tests {
         );
 
         assert_eq!(
-            parse_initial("4d6+10a"),
+            parse_initial_statement("4d6+10a"),
             Ok((
                 "",
                 DiceRollWithOp::new(
@@ -369,7 +407,7 @@ mod tests {
         );
 
         assert_eq!(
-            parse_initial("d6+d4"),
+            parse_initial_statement("d6+d4"),
             Ok((
                 "+d4",
                 DiceRollWithOp::new(
@@ -380,7 +418,7 @@ mod tests {
         );
 
         assert_eq!(
-            parse_initial("4d6+10a-d4"),
+            parse_initial_statement("4d6+10a-d4"),
             Ok((
                 "-d4",
                 DiceRollWithOp::new(
@@ -391,7 +429,7 @@ mod tests {
         );
 
         assert_eq!(
-            parse_initial("-d1d-4d4d"),
+            parse_initial_statement("-d1d-4d4d"),
             Ok((
                 "-4d4d",
                 DiceRollWithOp::new(
@@ -406,75 +444,75 @@ mod tests {
     fn test_parse_line() {
         assert_eq!(
             parse_line("d6"),
-            Ok(vec![DiceRollWithOp::new(
+            Ok(vec![vec![DiceRollWithOp::new(
                 DiceRoll::new(6, None, 1, RollType::Regular,),
                 Operation::Addition
-            )])
+            )]])
         );
         assert_eq!(
             parse_line("d20 +      5"),
-            Ok(vec![DiceRollWithOp::new(
+            Ok(vec![vec![DiceRollWithOp::new(
                 DiceRoll::new(20, Some(5), 1, RollType::Regular,),
                 Operation::Addition,
-            )])
+            )]])
         );
         assert_eq!(
             parse_line("2d10 - 5"),
-            Ok(vec![DiceRollWithOp::new(
+            Ok(vec![vec![DiceRollWithOp::new(
                 DiceRoll::new(10, Some(-5), 2, RollType::Regular,),
                 Operation::Addition
-            )])
+            )]])
         );
         assert_eq!(
             parse_line("3d6"),
-            Ok(vec![DiceRollWithOp::new(
+            Ok(vec![vec![DiceRollWithOp::new(
                 DiceRoll::new(6, None, 3, RollType::Regular,),
                 Operation::Addition,
-            )])
+            )]])
         );
         assert_eq!(
             parse_line("5d20 +      5"),
-            Ok(vec![DiceRollWithOp::new(
+            Ok(vec![vec![DiceRollWithOp::new(
                 DiceRoll::new(20, Some(5), 5, RollType::Regular,),
                 Operation::Addition
-            )])
+            )]])
         );
 
         // TODO: Make this an error
         assert_eq!(
             parse_line("d0 - 5"),
-            Ok(vec![DiceRollWithOp::new(
+            Ok(vec![vec![DiceRollWithOp::new(
                 DiceRoll::new(0, Some(-5), 1, RollType::Regular,),
                 Operation::Addition
-            )])
+            )]])
         );
 
         assert_eq!(
             parse_line("d200a"),
-            Ok(vec![DiceRollWithOp::new(
+            Ok(vec![vec![DiceRollWithOp::new(
                 DiceRoll::new(200, None, 1, RollType::WithAdvantage),
                 Operation::Addition
-            )])
+            )]])
         );
 
         assert_eq!(
             parse_line("d200 A"),
-            Ok(vec![DiceRollWithOp::new(
+            Ok(vec![vec![DiceRollWithOp::new(
                 DiceRoll::new(200, None, 1, RollType::WithAdvantage),
                 Operation::Addition
-            )])
+            )]])
         );
         assert_eq!(
             parse_line("d200 d"),
-            Ok(vec![DiceRollWithOp::new(
+            Ok(vec![vec![DiceRollWithOp::new(
                 DiceRoll::new(200, None, 1, RollType::WithDisadvantage),
                 Operation::Addition
-            )])
+            )]])
         );
 
         assert_eq!(
             parse_line("d100 + d4"),
-            Ok(vec![
+            Ok(vec![vec![
                 DiceRollWithOp::new(
                     DiceRoll::new(100, None, 1, RollType::Regular),
                     Operation::Addition
@@ -483,12 +521,12 @@ mod tests {
                     DiceRoll::new(4, None, 1, RollType::Regular),
                     Operation::Addition
                 )
-            ])
+            ]])
         );
 
         assert_eq!(
             parse_line("d100 - d6"),
-            Ok(vec![
+            Ok(vec![vec![
                 DiceRollWithOp::new(
                     DiceRoll::new(100, None, 1, RollType::Regular),
                     Operation::Addition
@@ -497,14 +535,14 @@ mod tests {
                     DiceRoll::new(6, None, 1, RollType::Regular),
                     Operation::Subtraction
                 )
-            ])
+            ]])
         );
 
         assert!(parse_line("cd20").is_err());
 
         assert_eq!(
             parse_line("2d6 + 2d4"),
-            Ok(vec![
+            Ok(vec![vec![
                 DiceRollWithOp::new(
                     DiceRoll::new(6, None, 2, RollType::Regular),
                     Operation::Addition
@@ -513,12 +551,12 @@ mod tests {
                     DiceRoll::new(4, None, 2, RollType::Regular),
                     Operation::Addition
                 )
-            ])
+            ]])
         );
 
         assert_eq!(
             parse_line("d20 + 2 + d4"),
-            Ok(vec![
+            Ok(vec![vec![
                 DiceRollWithOp::new(
                     DiceRoll::new(20, Some(2), 1, RollType::Regular,),
                     Operation::Addition
@@ -527,12 +565,12 @@ mod tests {
                     DiceRoll::new(4, None, 1, RollType::Regular,),
                     Operation::Addition
                 )
-            ])
+            ]])
         );
 
         assert_eq!(
             parse_line("d20 + d4 - 2d6"),
-            Ok(vec![
+            Ok(vec![vec![
                 DiceRollWithOp::new(
                     DiceRoll::new(20, None, 1, RollType::Regular),
                     Operation::Addition
@@ -545,12 +583,12 @@ mod tests {
                     DiceRoll::new(6, None, 2, RollType::Regular,),
                     Operation::Subtraction
                 ),
-            ])
+            ]])
         );
 
         assert_eq!(
             parse_line("d20 + 2 + d4 - 2d6"),
-            Ok(vec![
+            Ok(vec![vec![
                 DiceRollWithOp::new(
                     DiceRoll::new(20, Some(2), 1, RollType::Regular,),
                     Operation::Addition
@@ -563,12 +601,12 @@ mod tests {
                     DiceRoll::new(6, None, 2, RollType::Regular,),
                     Operation::Subtraction
                 ),
-            ])
+            ]])
         );
 
         assert_eq!(
             parse_line("d20 - 6 + d4 - 2d6"),
-            Ok(vec![
+            Ok(vec![vec![
                 DiceRollWithOp::new(
                     DiceRoll::new(20, Some(-6), 1, RollType::Regular,),
                     Operation::Addition
@@ -581,12 +619,12 @@ mod tests {
                     DiceRoll::new(6, None, 2, RollType::Regular,),
                     Operation::Subtraction
                 ),
-            ])
+            ]])
         );
 
         assert_eq!(
             parse_line("6d20 - 3d4+1d"),
-            Ok(vec![
+            Ok(vec![vec![
                 DiceRollWithOp::new(
                     DiceRoll::new(20, None, 6, RollType::Regular),
                     Operation::Addition
@@ -595,12 +633,12 @@ mod tests {
                     DiceRoll::new(4, Some(1), 3, RollType::WithDisadvantage),
                     Operation::Subtraction
                 )
-            ])
+            ]])
         );
 
         assert_eq!(
             parse_line("-d1d - 4d4d"),
-            Ok(vec![
+            Ok(vec![vec![
                 DiceRollWithOp::new(
                     DiceRoll::new(1, None, 1, RollType::WithDisadvantage),
                     Operation::Subtraction
@@ -609,6 +647,69 @@ mod tests {
                     DiceRoll::new(4, None, 4, RollType::WithDisadvantage),
                     Operation::Subtraction
                 )
+            ]])
+        );
+        assert_eq!(
+            parse_line("d20, d4"),
+            Ok(vec![
+                vec![DiceRollWithOp::new(
+                    DiceRoll::new(20, None, 1, RollType::Regular),
+                    Operation::Addition
+                )],
+                vec![DiceRollWithOp::new(
+                    DiceRoll::new(4, None, 1, RollType::Regular),
+                    Operation::Addition
+                )]
+            ])
+        );
+        assert_eq!(
+            parse_line("d20, d4, d6, d100, 3d100"),
+            Ok(vec![
+                vec![DiceRollWithOp::new(
+                    DiceRoll::new(20, None, 1, RollType::Regular),
+                    Operation::Addition
+                )],
+                vec![DiceRollWithOp::new(
+                    DiceRoll::new(4, None, 1, RollType::Regular),
+                    Operation::Addition
+                )],
+                vec![DiceRollWithOp::new(
+                    DiceRoll::new(6, None, 1, RollType::Regular),
+                    Operation::Addition
+                )],
+                vec![DiceRollWithOp::new(
+                    DiceRoll::new(100, None, 1, RollType::Regular),
+                    Operation::Addition
+                )],
+                vec![DiceRollWithOp::new(
+                    DiceRoll::new(100, None, 3, RollType::Regular),
+                    Operation::Addition
+                )]
+            ])
+        );
+        assert_eq!(
+            parse_line("d20, -d4, -d6, -d100+2, -3d100-6d"),
+            Ok(vec![
+                vec![DiceRollWithOp::new(
+                    DiceRoll::new(20, None, 1, RollType::Regular),
+                    Operation::Addition
+                )],
+                vec![DiceRollWithOp::new(
+                    DiceRoll::new(4, None, 1, RollType::Regular),
+                    Operation::Subtraction
+                )],
+                vec![DiceRollWithOp::new(
+                    DiceRoll::new(6, None, 1, RollType::Regular),
+                    Operation::Subtraction
+                )],
+                vec![DiceRollWithOp::new(
+                    DiceRoll::new(100, Some(2), 1, RollType::Regular),
+                    Operation::Subtraction
+                )],
+                vec![DiceRollWithOp::new(
+                    DiceRoll::new(100, Some(-6), 3, RollType::WithDisadvantage),
+                    Operation::Subtraction
+                )]
             ])
         );
     }

@@ -1,7 +1,7 @@
 use nom::{error::ParseError, IResult, Parser};
 
 // Gets an object from the first parser,
-// then matches an object from the second parser and does not discards it.
+// then matches an object from the second parser and does not discard it.
 pub fn terminated_spare<I, O1, O2, E: ParseError<I>, F, G>(
     mut first: F,
     mut second: G,
