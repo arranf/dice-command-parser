@@ -19,16 +19,16 @@ impl DiceRoll {
     ///
     /// This represents a d6 with no modifier
     /// ```
-    /// use dice_command_parser::dice_roll::{DiceRoll, RollType, Operation};
+    /// use dice_command_parser::dice_roll::{DiceRoll, RollType};
     ///
-    /// let dice_roll = DiceRoll::new(6, None, 1, RollType::Regular, Operation::Addition);
+    /// let dice_roll = DiceRoll::new(6, None, 1, RollType::Regular);
     /// ```
     ///
     /// This represents two d20 with a +1 modifier rolling with advantage
     /// ```
-    /// use dice_command_parser::dice_roll::{DiceRoll, RollType, Operation};
+    /// use dice_command_parser::dice_roll::{DiceRoll, RollType};
     ///
-    /// let dice_roll = DiceRoll::new(20, Some(1), 2, RollType::WithAdvantage, Operation::Subtraction);
+    /// let dice_roll = DiceRoll::new(20, Some(1), 2, RollType::WithAdvantage);
     /// ```
     #[must_use]
     pub fn new(
@@ -53,14 +53,14 @@ impl DiceRoll {
     /// ```
     /// use dice_command_parser::dice_roll::{DiceRoll, Operation};
     ///
-    /// let dice_roll = DiceRoll::new_regular_roll(6, None, 1, Operation::Addition);
+    /// let dice_roll = DiceRoll::new_regular_roll(6, None, 1);
     /// ```
     ///
     /// This represents two d20 with a +1 modifier.
     /// ```
     /// use dice_command_parser::dice_roll::{DiceRoll, Operation};
     ///
-    /// let dice_roll = DiceRoll::new_regular_roll(20, Some(1), 2, Operation::Addition);
+    /// let dice_roll = DiceRoll::new_regular_roll(20, Some(1), 2);
     /// ```
     #[must_use]
     pub fn new_regular_roll(
