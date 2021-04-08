@@ -6,7 +6,7 @@
 //! This crate provides functionality for the basic parsing of dice roll commands e.g. `d100`, `d6 + 5`, `2d20 - 1`.
 //! Given some input it will produce a `DiceRollWithOp` struct which can be used to then calculate a result.
 
-use nom::{branch, bytes, character, combinator, multi, sequence, Err};
+use nom::{branch, bytes, character, combinator, sequence, Err};
 
 /// Provides access to the `DiceRoll` struct.
 pub mod dice_roll;
@@ -280,7 +280,6 @@ pub fn parse_line(i: &str) -> Result<Vec<Vec<DiceRollWithOp>>, ParserError> {
             return Err(ParserError::Unknown);
         }
     }
-    drop(whitespaceless);
 }
 
 #[cfg(test)]
