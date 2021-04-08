@@ -10,8 +10,6 @@ pub struct DiceRoll {
     pub modifier: Option<i32>,
     /// Whether the roll has advantage, disadvantage, or is a regular roll
     pub roll_type: RollType,
-    /// How the roll should be applied
-    pub operation: Operation,
 }
 
 impl DiceRoll {
@@ -21,16 +19,16 @@ impl DiceRoll {
     ///
     /// This represents a d6 with no modifier
     /// ```
-    /// use dice_command_parser::dice_roll::{DiceRoll, RollType, Operation};
+    /// use dice_command_parser::dice_roll::{DiceRoll, RollType};
     ///
-    /// let dice_roll = DiceRoll::new(6, None, 1, RollType::Regular, Operation::Addition);
+    /// let dice_roll = DiceRoll::new(6, None, 1, RollType::Regular);
     /// ```
     ///
     /// This represents two d20 with a +1 modifier rolling with advantage
     /// ```
-    /// use dice_command_parser::dice_roll::{DiceRoll, RollType, Operation};
+    /// use dice_command_parser::dice_roll::{DiceRoll, RollType};
     ///
-    /// let dice_roll = DiceRoll::new(20, Some(1), 2, RollType::WithAdvantage, Operation::Subtraction);
+    /// let dice_roll = DiceRoll::new(20, Some(1), 2, RollType::WithAdvantage);
     /// ```
     #[must_use]
     pub fn new(
@@ -38,14 +36,12 @@ impl DiceRoll {
         modifier: Option<i32>,
         number_of_dice_to_roll: u32,
         roll_type: RollType,
-        operation: Operation,
     ) -> Self {
         DiceRoll {
             dice_sides,
             modifier,
             number_of_dice_to_roll,
             roll_type,
-            operation,
         }
     }
 
@@ -57,28 +53,26 @@ impl DiceRoll {
     /// ```
     /// use dice_command_parser::dice_roll::{DiceRoll, Operation};
     ///
-    /// let dice_roll = DiceRoll::new_regular_roll(6, None, 1, Operation::Addition);
+    /// let dice_roll = DiceRoll::new_regular_roll(6, None, 1);
     /// ```
     ///
     /// This represents two d20 with a +1 modifier.
     /// ```
     /// use dice_command_parser::dice_roll::{DiceRoll, Operation};
     ///
-    /// let dice_roll = DiceRoll::new_regular_roll(20, Some(1), 2, Operation::Addition);
+    /// let dice_roll = DiceRoll::new_regular_roll(20, Some(1), 2);
     /// ```
     #[must_use]
     pub fn new_regular_roll(
         dice_sides: u32,
         modifier: Option<i32>,
         number_of_dice_to_roll: u32,
-        operation: Operation,
     ) -> Self {
         DiceRoll {
             dice_sides,
             modifier,
             number_of_dice_to_roll,
             roll_type: RollType::Regular,
-            operation,
         }
     }
 }
