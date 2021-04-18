@@ -28,6 +28,7 @@ fn parse_end_of_input_or_modifier(i: &str) -> nom::IResult<&str, &str> {
     branch::alt((
         bytes::complete::tag("+"),
         bytes::complete::tag("-"),
+        bytes::complete::tag(","),
         combinator::eof,
     ))(i)
 }
@@ -327,7 +328,7 @@ mod tests {
     }
 
     #[test]
-    fn test_roll_parser() {
+    fn test_parse_roll_as_value() {
         assert_eq!(
             parse_roll_as_value("d6+2"),
             Ok(("", DiceRoll::new_regular_roll(6, Some(2), 1)))
@@ -378,7 +379,14 @@ mod tests {
         assert_eq!(
             parse_roll_as_value("d1d"),
             Ok(("", DiceRoll::new(1, None, 1, RollType::WithDisadvantage)))
-        )
+        );
+        assert_eq!(
+            parse_roll_as_value("d20d,d4"),
+            Ok((
+                ",d4",
+                DiceRoll::new(20, None, 1, RollType::WithDisadvantage)
+            ))
+        );
     }
 
     #[test]
@@ -434,6 +442,17 @@ mod tests {
                 DiceRollWithOp::new(
                     DiceRoll::new(1, None, 1, RollType::WithDisadvantage),
                     Operation::Subtraction
+                )
+            ))
+        );
+
+        assert_eq!(
+            parse_initial_statement("d20d,d4"),
+            Ok((
+                ",d4",
+                DiceRollWithOp::new(
+                    DiceRoll::new(20, None, 1, RollType::WithDisadvantage),
+                    Operation::Addition
                 )
             ))
         );
@@ -708,6 +727,19 @@ mod tests {
                 vec![DiceRollWithOp::new(
                     DiceRoll::new(100, Some(-6), 3, RollType::WithDisadvantage),
                     Operation::Subtraction
+                )]
+            ])
+        );
+        assert_eq!(
+            parse_line("d20d, d4"),
+            Ok(vec![
+                vec![DiceRollWithOp::new(
+                    DiceRoll::new(20, None, 1, RollType::WithDisadvantage),
+                    Operation::Addition
+                )],
+                vec![DiceRollWithOp::new(
+                    DiceRoll::new(4, None, 1, RollType::Regular),
+                    Operation::Addition
                 )]
             ])
         );
