@@ -28,7 +28,7 @@ impl DiceRoll {
     /// ```
     /// use dice_command_parser::dice_roll::{DiceRoll, RollType};
     ///
-    /// let dice_roll = DiceRoll::new(20, Some(1), 2, RollType::WithAdvantage);
+    /// let dice_roll = DiceRoll::new(20, Some(1), 2, RollType::KeepHighest);
     /// ```
     #[must_use]
     pub fn new(
@@ -80,10 +80,10 @@ impl DiceRoll {
 /// Represents whether a roll has advantage, disadvantage, independence, or not.
 #[derive(Clone, Debug, PartialEq)]
 pub enum RollType {
-    /// The roll has advantage and the highest of the two rolls for a set of dice is taken.
-    WithAdvantage,
-    /// The roll has disadvantage and the lowest of the two rolls for a set of dice is taken.
-    WithDisadvantage,
+    /// The roll will keep the highest of multiple dice rolled. This is used for Advantage in D&D or Bane in Dragonbane.
+    KeepHighest,
+    /// The roll will keep the lowest of multiple dice rolled. This is used for Disadvantage in D&D or Boon in Dragonbane.
+    KeepLowest,
     /// A regular roll occurs - only one roll needs to occur.
     Regular,
 }

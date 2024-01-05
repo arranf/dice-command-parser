@@ -41,22 +41,32 @@ fn parse_operator_as_value(i: &str) -> nom::IResult<&str, Operation> {
     ))(i)
 }
 
-// Returns RollType::Regular if no adv or disadv is parsed
+// Returns RollType::Regular if no roll rolltype is observed
 fn parse_roll_type(i: &str) -> nom::IResult<&str, RollType> {
     let result = combinator::opt(branch::alt((
         combinator::value(
-            RollType::WithAdvantage,
+            RollType::KeepHighest,
             // Only parse advantage if preceding a operating separating dice strings or at the end of input
             terminated_spare(
-                bytes::complete::tag_no_case("a"),
+                branch::alt((
+                    bytes::complete::tag_no_case("kh"),
+                    bytes::complete::tag_no_case("adv"),
+                    bytes::complete::tag_no_case("a"),
+                    bytes::complete::tag_no_case("bane"),
+                )),
                 parse_end_of_input_or_modifier,
             ),
         ),
         combinator::value(
-            RollType::WithDisadvantage,
+            RollType::KeepLowest,
             // Only parse advantage if preceding a operating separating dice strings or at the end of input
             terminated_spare(
-                bytes::complete::tag_no_case("d"),
+                branch::alt((
+                    bytes::complete::tag_no_case("kl"),
+                    bytes::complete::tag_no_case("dadv"),
+                    bytes::complete::tag_no_case("d"),
+                    bytes::complete::tag_no_case("boon"),
+                )),
                 parse_end_of_input_or_modifier,
             ),
         ),
@@ -316,15 +326,15 @@ mod tests {
 
     #[test]
     fn test_roll_type_parser() {
-        assert_eq!(parse_roll_type("a"), Ok(("", RollType::WithAdvantage)));
+        assert_eq!(parse_roll_type("a"), Ok(("", RollType::KeepHighest)));
 
-        assert_eq!(parse_roll_type("d"), Ok(("", RollType::WithDisadvantage)));
+        assert_eq!(parse_roll_type("d"), Ok(("", RollType::KeepLowest)));
 
         assert_eq!(parse_roll_type(""), Ok(("", RollType::Regular)));
 
         assert_eq!(parse_roll_type("e"), Ok(("e", RollType::Regular)));
         assert_eq!(parse_roll_type("+"), Ok(("+", RollType::Regular)));
-        assert_eq!(parse_roll_type("d+"), Ok(("+", RollType::WithDisadvantage)));
+        assert_eq!(parse_roll_type("d+"), Ok(("+", RollType::KeepLowest)));
     }
 
     #[test]
@@ -341,15 +351,27 @@ mod tests {
 
         assert_eq!(
             parse_roll_as_value("2d20-2a"),
-            Ok(("", DiceRoll::new(20, Some(-2), 2, RollType::WithAdvantage)))
+            Ok(("", DiceRoll::new(20, Some(-2), 2, RollType::KeepHighest)))
+        );
+
+        assert_eq!(
+            parse_roll_as_value("2d20-2kh"),
+            Ok(("", DiceRoll::new(20, Some(-2), 2, RollType::KeepHighest)))
+        );
+
+        assert_eq!(
+            parse_roll_as_value("2d20-2adv"),
+            Ok(("", DiceRoll::new(20, Some(-2), 2, RollType::KeepHighest)))
+        );
+
+        assert_eq!(
+            parse_roll_as_value("2d20-2bane"),
+            Ok(("", DiceRoll::new(20, Some(-2), 2, RollType::KeepHighest)))
         );
 
         assert_eq!(
             parse_roll_as_value("2d20-2a+d4"),
-            Ok((
-                "+d4",
-                DiceRoll::new(20, Some(-2), 2, RollType::WithAdvantage)
-            ))
+            Ok(("+d4", DiceRoll::new(20, Some(-2), 2, RollType::KeepHighest)))
         );
 
         assert_eq!(
@@ -368,24 +390,36 @@ mod tests {
 
         assert_eq!(
             parse_roll_as_value("3d4+1d"),
-            Ok(("", DiceRoll::new(4, Some(1), 3, RollType::WithDisadvantage)))
+            Ok(("", DiceRoll::new(4, Some(1), 3, RollType::KeepLowest)))
         );
 
         assert_eq!(
             parse_roll_as_value("3d4+1d"),
-            Ok(("", DiceRoll::new(4, Some(1), 3, RollType::WithDisadvantage)))
+            Ok(("", DiceRoll::new(4, Some(1), 3, RollType::KeepLowest)))
+        );
+
+        assert_eq!(
+            parse_roll_as_value("3d4+1dadv"),
+            Ok(("", DiceRoll::new(4, Some(1), 3, RollType::KeepLowest)))
+        );
+
+        assert_eq!(
+            parse_roll_as_value("3d4+1boon"),
+            Ok(("", DiceRoll::new(4, Some(1), 3, RollType::KeepLowest)))
+        );
+
+        assert_eq!(
+            parse_roll_as_value("3d4+1kl"),
+            Ok(("", DiceRoll::new(4, Some(1), 3, RollType::KeepLowest)))
         );
 
         assert_eq!(
             parse_roll_as_value("d1d"),
-            Ok(("", DiceRoll::new(1, None, 1, RollType::WithDisadvantage)))
+            Ok(("", DiceRoll::new(1, None, 1, RollType::KeepLowest)))
         );
         assert_eq!(
             parse_roll_as_value("d20d,d4"),
-            Ok((
-                ",d4",
-                DiceRoll::new(20, None, 1, RollType::WithDisadvantage)
-            ))
+            Ok((",d4", DiceRoll::new(20, None, 1, RollType::KeepLowest)))
         );
     }
 
@@ -407,7 +441,7 @@ mod tests {
             Ok((
                 "",
                 DiceRollWithOp::new(
-                    DiceRoll::new(6, Some(10), 4, RollType::WithAdvantage),
+                    DiceRoll::new(6, Some(10), 4, RollType::KeepHighest),
                     Operation::Addition
                 )
             ))
@@ -429,7 +463,7 @@ mod tests {
             Ok((
                 "-d4",
                 DiceRollWithOp::new(
-                    DiceRoll::new(6, Some(10), 4, RollType::WithAdvantage),
+                    DiceRoll::new(6, Some(10), 4, RollType::KeepHighest),
                     Operation::Addition
                 )
             ))
@@ -440,7 +474,7 @@ mod tests {
             Ok((
                 "-4d4d",
                 DiceRollWithOp::new(
-                    DiceRoll::new(1, None, 1, RollType::WithDisadvantage),
+                    DiceRoll::new(1, None, 1, RollType::KeepLowest),
                     Operation::Subtraction
                 )
             ))
@@ -451,7 +485,7 @@ mod tests {
             Ok((
                 ",d4",
                 DiceRollWithOp::new(
-                    DiceRoll::new(20, None, 1, RollType::WithDisadvantage),
+                    DiceRoll::new(20, None, 1, RollType::KeepLowest),
                     Operation::Addition
                 )
             ))
@@ -508,7 +542,7 @@ mod tests {
         assert_eq!(
             parse_line("d200a"),
             Ok(vec![vec![DiceRollWithOp::new(
-                DiceRoll::new(200, None, 1, RollType::WithAdvantage),
+                DiceRoll::new(200, None, 1, RollType::KeepHighest),
                 Operation::Addition
             )]])
         );
@@ -516,14 +550,14 @@ mod tests {
         assert_eq!(
             parse_line("d200 A"),
             Ok(vec![vec![DiceRollWithOp::new(
-                DiceRoll::new(200, None, 1, RollType::WithAdvantage),
+                DiceRoll::new(200, None, 1, RollType::KeepHighest),
                 Operation::Addition
             )]])
         );
         assert_eq!(
             parse_line("d200 d"),
             Ok(vec![vec![DiceRollWithOp::new(
-                DiceRoll::new(200, None, 1, RollType::WithDisadvantage),
+                DiceRoll::new(200, None, 1, RollType::KeepLowest),
                 Operation::Addition
             )]])
         );
@@ -641,28 +675,28 @@ mod tests {
         );
 
         assert_eq!(
-            parse_line("6d20 - 3d4+1d"),
+            parse_line("6d20 - 3d4+1kl"),
             Ok(vec![vec![
                 DiceRollWithOp::new(
                     DiceRoll::new(20, None, 6, RollType::Regular),
                     Operation::Addition
                 ),
                 DiceRollWithOp::new(
-                    DiceRoll::new(4, Some(1), 3, RollType::WithDisadvantage),
+                    DiceRoll::new(4, Some(1), 3, RollType::KeepLowest),
                     Operation::Subtraction
                 )
             ]])
         );
 
         assert_eq!(
-            parse_line("-d1d - 4d4d"),
+            parse_line("-d1kl - 4d4kl"),
             Ok(vec![vec![
                 DiceRollWithOp::new(
-                    DiceRoll::new(1, None, 1, RollType::WithDisadvantage),
+                    DiceRoll::new(1, None, 1, RollType::KeepLowest),
                     Operation::Subtraction
                 ),
                 DiceRollWithOp::new(
-                    DiceRoll::new(4, None, 4, RollType::WithDisadvantage),
+                    DiceRoll::new(4, None, 4, RollType::KeepLowest),
                     Operation::Subtraction
                 )
             ]])
@@ -706,7 +740,7 @@ mod tests {
             ])
         );
         assert_eq!(
-            parse_line("d20, -d4, -d6, -d100+2, -3d100-6d"),
+            parse_line("d20, -d4, -d6, -d100+2, -3d100-6kl"),
             Ok(vec![
                 vec![DiceRollWithOp::new(
                     DiceRoll::new(20, None, 1, RollType::Regular),
@@ -725,16 +759,16 @@ mod tests {
                     Operation::Subtraction
                 )],
                 vec![DiceRollWithOp::new(
-                    DiceRoll::new(100, Some(-6), 3, RollType::WithDisadvantage),
+                    DiceRoll::new(100, Some(-6), 3, RollType::KeepLowest),
                     Operation::Subtraction
                 )]
             ])
         );
         assert_eq!(
-            parse_line("d20d, d4"),
+            parse_line("d20kl, d4"),
             Ok(vec![
                 vec![DiceRollWithOp::new(
-                    DiceRoll::new(20, None, 1, RollType::WithDisadvantage),
+                    DiceRoll::new(20, None, 1, RollType::KeepLowest),
                     Operation::Addition
                 )],
                 vec![DiceRollWithOp::new(
@@ -763,7 +797,7 @@ mod tests {
             Ok((
                 "",
                 vec![DiceRollWithOp::new(
-                    DiceRoll::new(12, Some(-4), 3, RollType::WithAdvantage),
+                    DiceRoll::new(12, Some(-4), 3, RollType::KeepHighest),
                     Operation::Subtraction
                 )]
             ))
